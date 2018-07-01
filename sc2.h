@@ -48,10 +48,10 @@
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
 
-#ifdef _WIN32  
-#define SUBTAG_OFFSET 0xF60
+#ifdef _WIN64 
+#define SUBTAG_OFFSET 0x1720
 #else
-#define SUBTAG_OFFSET 0xFC1
+#define SUBTAG_OFFSET 0xF60
 #endif
 
 #define SCAN_TYPE_STRING 0
