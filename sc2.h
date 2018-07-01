@@ -42,7 +42,11 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifdef _WIN64
+#include "payload64.h"
+#else
 #include "payload.h"
+#endif
 
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "shlwapi.lib")

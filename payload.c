@@ -106,7 +106,7 @@ VOID WINAPI Handler(DWORD fdwControl) {
     #include "data.h"
 
     // we only expect to receive this control code
-    if (fdw != CONTROL_SERVICE_INTERROGATE) return 0;
+    //if (fdwControl != CONTROL_SERVICE_INTERROGATE) return 0;
 
   #if defined(_WIN64)
     peb = (PPEB) __readgsqword(0x60);
@@ -168,7 +168,6 @@ VOID WINAPI Handler(DWORD fdwControl) {
         }
       }
     }
-    return 0;
 }
 
 // get address of API from import table using string
