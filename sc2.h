@@ -76,15 +76,15 @@ typedef struct _SCAN_DATA_T {
 } SCAN_DATA, *PSCAN_DATA;
 
 typedef struct _INTERNAL_DISPATCH_ENTRY {
-  LPWSTR                  ServiceName;
-  LPWSTR                  ServiceRealName;
-  LPSERVICE_MAIN_FUNCTION ServiceStartRoutine;
-  LPHANDLER_FUNCTION_EX   ControlHandler;
-  HANDLE                  StatusHandle;
-  DWORD                   ServiceFlags;
-  DWORD                   Tag;
-  HANDLE                  MainThreadHandle;
-  DWORD                   dwReserved;
+    LPWSTR                  ServiceName;
+    LPWSTR                  ServiceRealName;
+    LPSERVICE_MAIN_FUNCTION ServiceStartRoutine;
+    LPHANDLER_FUNCTION_EX   ControlHandler;
+    HANDLE                  StatusHandle;
+    DWORD                   ServiceFlags;
+    DWORD                   Tag;
+    HANDLE                  MainThreadHandle;
+    DWORD                   dwReserved;
 } INTERNAL_DISPATCH_ENTRY, *PINTERNAL_DISPATCH_ENTRY;
 
 typedef struct _SERVICE_ENTRY {

